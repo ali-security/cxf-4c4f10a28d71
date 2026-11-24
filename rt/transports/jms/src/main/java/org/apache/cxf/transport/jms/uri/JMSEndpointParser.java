@@ -89,7 +89,11 @@ public final class JMSEndpointParser {
         String jndiUrl = getAndRemoveParameter(parameters, JMSURIConstants.JNDIURL_PARAMETER_NAME);
 
         String messageType = getAndRemoveParameter(parameters, JMSURIConstants.MESSAGE_TYPE_PARAMETER_NAME);
-        
+        String useObjectMessageFallback = getAndRemoveParameter(parameters,
+                                            JMSURIConstants.USE_OBJECT_MESSAGE_FALLBACK_PARAMETER_NAME);
+        String allowObjectMessages = getAndRemoveParameter(parameters,
+                                            JMSURIConstants.ALLOW_OBJECT_MESSAGES_PARAMETER_NAME);
+
         if (deliveryMode != null) {
             endpoint.setDeliveryMode(DeliveryModeType.valueOf(deliveryMode));
         }
@@ -120,6 +124,12 @@ public final class JMSEndpointParser {
         }
         if (messageType != null) {
             endpoint.setMessageType(MessageType.fromValue(messageType));
+        }
+        if (useObjectMessageFallback != null) {
+            endpoint.setUseObjectMessageFallback(useObjectMessageFallback);
+        }
+        if (allowObjectMessages != null) {
+            endpoint.setAllowObjectMessages(allowObjectMessages);
         }
 
         for (String key : parameters.keySet()) {

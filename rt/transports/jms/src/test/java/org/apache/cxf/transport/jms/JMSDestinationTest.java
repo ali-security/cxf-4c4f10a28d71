@@ -27,6 +27,7 @@ import java.io.StringReader;
 
 import javax.jms.DeliveryMode;
 import javax.jms.Destination;
+import javax.jms.ObjectMessage;
 import javax.jms.Queue;
 import javax.jms.Topic;
 
@@ -44,6 +45,7 @@ import org.apache.cxf.transport.MessageObserver;
 import org.apache.cxf.transport.MultiplexDestination;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.springframework.jms.JmsException;
 
 public class JMSDestinationTest extends AbstractJMSTester {
     private static final int MAX_RECEIVE_TIME = 10;
@@ -533,6 +535,49 @@ public class JMSDestinationTest extends AbstractJMSTester {
         Thread.sleep(1000);
         conduit.close();
         destination.shutdown();
+    }
+
+    @Test
+    public void testObjectMessageIsRejectedByDefault() throws Exception {
+        setupServiceInfo("http://cxf.apache.org/hello_world_jms", "/wsdl/jms_test.wsdl",
+                         "HelloWorldService", "HelloWorldPort");
+        final JMSDestination destination = setupJMSDestination(true);
+        try {
+            assertFalse(destination.getJmsConfig().isAllowObjectMessages());
+            ObjectMessage request =
+                DeserializationTracker.createSerializedObjectMessage(new DeserializationTracker());
+            DeserializationTracker.reset();
+            try {
+                destination.onMessage(request);
+                fail("An inbound ObjectMessage should have been rejected");
+            } catch (JmsException ex) {
+                assertTrue(ex.getMessage(),
+                           ex.getMessage().contains("ObjectMessage is disabled by configuration"));
+            }
+            assertFalse("The ObjectMessage body must not be deserialized",
+                        DeserializationTracker.isDeserialized());
+            assertNull("The rejected request must not be dispatched", destMessage);
+        } finally {
+            destination.shutdown();
+        }
+    }
+
+    @Test
+    public void testObjectMessageIsAcceptedWhenAllowed() throws Exception {
+        setupServiceInfo("http://cxf.apache.org/hello_world_jms", "/wsdl/jms_test.wsdl",
+                         "HelloWorldService", "HelloWorldPort");
+        final JMSDestination destination = setupJMSDestination(true);
+        try {
+            destination.getJmsConfig().setAllowObjectMessages(true);
+            ObjectMessage request =
+                DeserializationTracker.createSerializedObjectMessage(MESSAGE_CONTENT.getBytes("UTF-8"));
+            destination.onMessage(request);
+            assertNotNull("The request should have been dispatched", destMessage);
+            assertEquals(MESSAGE_CONTENT,
+                         IOUtils.toString(destMessage.getContent(InputStream.class), "UTF-8"));
+        } finally {
+            destination.shutdown();
+        }
     }
 
     @Test

@@ -30,6 +30,8 @@ import org.apache.cxf.transport.jms.spec.JMSSpecConstants;
 public class JMSEndpoint extends JMSEndpointType {
     Map<String, String> jndiParameters = new HashMap<String, String>();
     Map<String, String> parameters = new HashMap<String, String>();
+    private Boolean useObjectMessageFallback;
+    private Boolean allowObjectMessages;
 
     /**
      * @param uri
@@ -100,5 +102,37 @@ public class JMSEndpoint extends JMSEndpointType {
      */
     public Map<String, String> getParameters() {
         return parameters;
+    }
+
+    public boolean isAllowObjectMessages() {
+        return allowObjectMessages != null && allowObjectMessages.booleanValue();
+    }
+
+    public void setAllowObjectMessages(boolean allowObjectMessages) {
+        this.allowObjectMessages = Boolean.valueOf(allowObjectMessages);
+    }
+
+    public void setAllowObjectMessages(String allowObjectMessages) {
+        this.allowObjectMessages = Boolean.valueOf(Boolean.parseBoolean(allowObjectMessages));
+    }
+
+    public boolean isSetAllowObjectMessages() {
+        return allowObjectMessages != null;
+    }
+
+    public boolean isUseObjectMessageFallback() {
+        return useObjectMessageFallback != null && useObjectMessageFallback.booleanValue();
+    }
+
+    public void setUseObjectMessageFallback(boolean useObjectMessageFallback) {
+        this.useObjectMessageFallback = Boolean.valueOf(useObjectMessageFallback);
+    }
+
+    public void setUseObjectMessageFallback(String useObjectMessageFallback) {
+        this.useObjectMessageFallback = Boolean.valueOf(Boolean.parseBoolean(useObjectMessageFallback));
+    }
+
+    public boolean isSetUseObjectMessageFallback() {
+        return useObjectMessageFallback != null;
     }
 }

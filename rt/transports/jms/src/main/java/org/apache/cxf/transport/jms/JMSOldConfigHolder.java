@@ -210,6 +210,13 @@ public class JMSOldConfigHolder {
             jmsConfig.setPriority(priority);
         }
 
+        if (endpoint.isSetUseObjectMessageFallback()) {
+            jmsConfig.setUseObjectMessageFallback(endpoint.isUseObjectMessageFallback());
+        }
+        if (endpoint.isSetAllowObjectMessages()) {
+            jmsConfig.setAllowObjectMessages(endpoint.isAllowObjectMessages());
+        }
+
         if (jmsConfig.isUsingEndpointInfo()) {
             JndiTemplate jt = new JndiTemplate();
             jt.setEnvironment(JMSOldConfigHolder.getInitialContextEnv(endpoint));

@@ -20,18 +20,116 @@
 package org.apache.cxf.transport.jms;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.Reader;
 import java.io.UnsupportedEncodingException;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
 import javax.jms.Message;
+import javax.jms.ObjectMessage;
+import javax.jms.StreamMessage;
 
+import org.apache.cxf.helpers.CastUtils;
+import org.apache.cxf.helpers.IOUtils;
 import org.apache.cxf.message.MessageImpl;
 import org.apache.cxf.security.SecurityContext;
+import org.apache.cxf.transport.jms.spec.JMSSpecConstants;
+import org.easymock.EasyMock;
 import org.junit.Assert;
 import org.junit.Test;
+import org.springframework.jms.JmsException;
 
 public class JMSUtilsTest extends Assert {
+
+    @Test
+    public void testObjectMessageIsRejectedByDefault() throws Exception {
+        ObjectMessage objectMessage =
+            DeserializationTracker.createSerializedObjectMessage(new DeserializationTracker());
+        DeserializationTracker.reset();
+        org.apache.cxf.message.Message inMessage = new MessageImpl();
+        try {
+            JMSUtils.retrieveAndSetPayload(inMessage, objectMessage, null);
+            fail("Expected the ObjectMessage to be rejected");
+        } catch (JmsException ex) {
+            assertTrue(ex.getMessage(), ex.getMessage().contains("ObjectMessage is disabled by configuration"));
+        }
+        assertFalse("The ObjectMessage body must not be deserialized", DeserializationTracker.isDeserialized());
+        assertNull(inMessage.getContent(InputStream.class));
+        assertNull(inMessage.getContent(Reader.class));
+    }
+
+    @Test
+    public void testObjectMessageIsRejectedWhenNotAllowed() throws Exception {
+        ObjectMessage objectMessage =
+            DeserializationTracker.createSerializedObjectMessage(new DeserializationTracker());
+        DeserializationTracker.reset();
+        try {
+            JMSUtils.retrieveAndSetPayload(new MessageImpl(), objectMessage, null, false);
+            fail("Expected the ObjectMessage to be rejected");
+        } catch (JmsException ex) {
+            assertTrue(ex.getMessage(), ex.getMessage().contains("ObjectMessage is disabled by configuration"));
+        }
+        assertFalse("The ObjectMessage body must not be deserialized", DeserializationTracker.isDeserialized());
+    }
+
+    @Test
+    public void testObjectMessageIsNotReadByDefault() throws Exception {
+        // the body accessor must not be called at all
+        ObjectMessage objectMessage = EasyMock.createMock(ObjectMessage.class);
+        EasyMock.replay(objectMessage);
+        try {
+            JMSUtils.retrieveAndSetPayload(new MessageImpl(), objectMessage, null);
+            fail("Expected the ObjectMessage to be rejected");
+        } catch (JmsException ex) {
+            assertTrue(ex.getMessage(), ex.getMessage().contains("ObjectMessage is disabled by configuration"));
+        }
+        EasyMock.verify(objectMessage);
+    }
+
+    @Test
+    public void testObjectMessageCanBeEnabled() throws Exception {
+        byte[] payload = "payload".getBytes("UTF-8");
+        org.apache.cxf.message.Message inMessage = new MessageImpl();
+        JMSUtils.retrieveAndSetPayload(inMessage, DeserializationTracker.createSerializedObjectMessage(payload),
+                                       null, true);
+        assertEquals(Collections.singletonList(JMSConstants.BYTE_MESSAGE_TYPE),
+                     getProtocolHeaders(inMessage).get(JMSSpecConstants.JMS_MESSAGE_TYPE));
+        InputStream in = inMessage.getContent(InputStream.class);
+        assertNotNull(in);
+        assertEquals("payload", IOUtils.toString(in, "UTF-8"));
+
+        // when explicitly allowed the body is deserialized again
+        DeserializationTracker.reset();
+        JMSUtils.retrieveAndSetPayload(new MessageImpl(),
+                                       DeserializationTracker
+                                           .createSerializedObjectMessage(new DeserializationTracker()),
+                                       null, true);
+        assertTrue(DeserializationTracker.isDeserialized());
+    }
+
+    @Test
+    public void testStreamMessageIsReportedAsUnsupportedByDefault() throws Exception {
+        // no body accessor (readObject, readString, readBytes, ...) must be called
+        StreamMessage streamMessage = EasyMock.createMock(StreamMessage.class);
+        EasyMock.replay(streamMessage);
+
+        org.apache.cxf.message.Message inMessage = new MessageImpl();
+        JMSUtils.retrieveAndSetPayload(inMessage, streamMessage, null);
+
+        assertEquals(Collections.singletonList("stream"),
+                     getProtocolHeaders(inMessage).get(JMSSpecConstants.JMS_MESSAGE_TYPE));
+        assertNull(inMessage.getContent(Reader.class));
+        EasyMock.verify(streamMessage);
+    }
+
+    private static Map<String, List<String>> getProtocolHeaders(org.apache.cxf.message.Message inMessage) {
+        return CastUtils.cast((Map<?, ?>)inMessage.get(org.apache.cxf.message.Message.PROTOCOL_HEADERS));
+    }
+
     @Test
     public void testGetEncoding() throws IOException {                
         assertEquals("Get the wrong encoding", JMSUtils.getEncoding("text/xml; charset=utf-8"), "UTF-8");

@@ -99,10 +99,27 @@ public final class JMSUtils {
      */
     public static Message createAndSetPayload(Object payload, Session session, String messageType)
         throws JMSException {
+        return createAndSetPayload(payload, session, messageType, true);
+    }
+
+    /**
+     * Create a JMS of the appropriate type populated with the given payload.
+     *
+     * @param payload the message payload, expected to be either of type String or byte[] depending on payload
+     *            type
+     * @param session the JMS session
+     * @param messageType the JMS message type
+     * @param useObjectMessageFallback whether non-text payloads should fall back to ObjectMessage
+     * @return a JMS of the appropriate type populated with the given payload
+     */
+    public static Message createAndSetPayload(Object payload, Session session, String messageType,
+                                              boolean useObjectMessageFallback)
+        throws JMSException {
         Message message = null;
         if (JMSConstants.TEXT_MESSAGE_TYPE.equals(messageType)) {
             message = session.createTextMessage((String)payload);
-        } else if (JMSConstants.BYTE_MESSAGE_TYPE.equals(messageType)) {
+        } else if (JMSConstants.BYTE_MESSAGE_TYPE.equals(messageType)
+            || !useObjectMessageFallback) {
             message = session.createBytesMessage();
             ((BytesMessage)message).writeBytes((byte[])payload);
         } else {
@@ -121,16 +138,42 @@ public final class JMSUtils {
      * @return the message payload as byte[]
      * @throws UnsupportedEncodingException
      */
-    @SuppressWarnings("deprecation")
     public static void retrieveAndSetPayload(org.apache.cxf.message.Message inMessage,
                                              Message message, String encoding)
+        throws UnsupportedEncodingException {
+        retrieveAndSetPayload(inMessage, message, encoding, false);
+    }
+
+    /**
+     * Extract the payload of an incoming message.
+     * @param inMessage
+     *
+     * @param message the incoming message
+     * @param encoding the message encoding
+     * @param allowObjectMessage whether ObjectMessage and StreamMessage deserialization is permitted
+     * @throws UnsupportedEncodingException
+     */
+    @SuppressWarnings("deprecation")
+    public static void retrieveAndSetPayload(org.apache.cxf.message.Message inMessage,
+                                             Message message, String encoding,
+                                             boolean allowObjectMessage)
         throws UnsupportedEncodingException {
         String messageType = null;
         Object converted;
         byte[] result;
         try {
-            converted = new org.springframework.jms.support.converter.SimpleMessageConverter102()
-                .fromMessage(message);
+            if (message instanceof ObjectMessage && !allowObjectMessage) {
+                throw new JMSException("ObjectMessage is disabled by configuration");
+            }
+            if (message instanceof StreamMessage && !allowObjectMessage) {
+                // Do not read the body: StreamMessage.readObject() may deserialize provider-specific
+                // object values. Report the message as an unsupported format instead, so that the
+                // SOAP/JMS binding can reply with an unsupportedJMSMessageFormat fault.
+                converted = message;
+            } else {
+                converted = new org.springframework.jms.support.converter.SimpleMessageConverter102()
+                    .fromMessage(message);
+            }
         } catch (MessageConversionException e) {
             throw new RuntimeException("Conversion failed", e);
         } catch (JMSException e) {
@@ -468,7 +511,8 @@ public final class JMSUtils {
                                                         Object payload, String messageType,
                                                         Session session, Destination replyTo,
                                                         String correlationId) throws JMSException {
-        Message jmsMessage = JMSUtils.createAndSetPayload(payload, session, messageType);
+        Message jmsMessage = JMSUtils.createAndSetPayload(payload, session, messageType,
+                                                          jmsConfig.isUseObjectMessageFallback());
 
         if (replyTo != null) {
             jmsMessage.setJMSReplyTo(replyTo);

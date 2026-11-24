@@ -322,6 +322,66 @@ public class JMSConfigurationTest extends Assert {
     }
 
     @Test
+    public void testObjectMessageSettingsDefaultToFalse() throws Exception {
+        JMSConfiguration jmsConfig = new JMSConfiguration();
+        assertFalse(jmsConfig.isUseObjectMessageFallback());
+        assertFalse(jmsConfig.isAllowObjectMessages());
+
+        jmsConfig = createFromAddress("jms:queue:Foo.Bar", null);
+        assertFalse(jmsConfig.isUseObjectMessageFallback());
+        assertFalse(jmsConfig.isAllowObjectMessages());
+    }
+
+    @Test
+    public void testUseObjectMessageFallbackIsSet() throws Exception {
+        JMSConfiguration jmsConfig = createFromAddress("jms:queue:Foo.Bar?useObjectMessageFallback=true", null);
+        assertTrue(jmsConfig.isUseObjectMessageFallback());
+        assertFalse(jmsConfig.isAllowObjectMessages());
+    }
+
+    @Test
+    public void testAllowObjectMessagesIsSet() throws Exception {
+        JMSConfiguration jmsConfig = createFromAddress("jms:queue:Foo.Bar?allowObjectMessages=true", null);
+        assertTrue(jmsConfig.isAllowObjectMessages());
+        assertFalse(jmsConfig.isUseObjectMessageFallback());
+    }
+
+    @Test
+    public void testObjectMessageSettingsOfSuppliedConfigurationAreKept() throws Exception {
+        JMSConfiguration supplied = new JMSConfiguration();
+        supplied.setAllowObjectMessages(true);
+        supplied.setUseObjectMessageFallback(true);
+        JMSConfiguration jmsConfig = createFromAddress("jms:queue:Foo.Bar", supplied);
+        assertTrue(jmsConfig.isAllowObjectMessages());
+        assertTrue(jmsConfig.isUseObjectMessageFallback());
+
+        supplied = new JMSConfiguration();
+        supplied.setAllowObjectMessages(true);
+        supplied.setUseObjectMessageFallback(true);
+        jmsConfig = createFromAddress("jms:queue:Foo.Bar?allowObjectMessages=false"
+                                      + "&useObjectMessageFallback=false", supplied);
+        assertFalse(jmsConfig.isAllowObjectMessages());
+        assertFalse(jmsConfig.isUseObjectMessageFallback());
+    }
+
+    private JMSConfiguration createFromAddress(String address, JMSConfiguration supplied) throws Exception {
+        Bus oldBus = BusFactory.getDefaultBus(false);
+        Bus bus = BusFactory.newInstance().createBus();
+        try {
+            EndpointInfo ei = new EndpointInfo();
+            ei.setAddress(address);
+            JMSOldConfigHolder holder = new JMSOldConfigHolder();
+            if (supplied != null) {
+                holder.setJmsConfig(supplied);
+            }
+            return holder.createJMSConfigurationFromEndpointInfo(bus, ei, null, true);
+        } finally {
+            bus.shutdown(true);
+            BusFactory.setDefaultBus(oldBus);
+        }
+    }
+
+    @Test
     public void testBlockedObjectFactoryRejected() {
         assertBlockedEnvProperty("java.naming.factory.object", "com.attacker.EvilObjectFactory");
     }

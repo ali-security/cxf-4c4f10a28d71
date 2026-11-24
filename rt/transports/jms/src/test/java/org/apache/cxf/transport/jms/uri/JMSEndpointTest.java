@@ -177,6 +177,38 @@ public class JMSEndpointTest extends Assert {
         
     }
     
+    @Test
+    public void testAllowObjectMessagesDefaultsToFalse() throws Exception {
+        JMSEndpoint endpoint = resolveEndpoint("jms:queue:Foo.Bar");
+        assertFalse(endpoint.isAllowObjectMessages());
+        assertFalse(endpoint.isSetAllowObjectMessages());
+        assertFalse(new JMSEndpoint().isAllowObjectMessages());
+    }
+
+    @Test
+    public void testAllowObjectMessagesCanBeEnabledFromUri() throws Exception {
+        JMSEndpoint endpoint = resolveEndpoint("jms:queue:Foo.Bar?allowObjectMessages=true");
+        assertTrue(endpoint.isAllowObjectMessages());
+        assertNull(endpoint.getParameter("allowObjectMessages"));
+        assertFalse(endpoint.getRequestURI().contains("allowObjectMessages"));
+    }
+
+    @Test
+    public void testUseObjectMessageFallbackDefaultsToFalse() throws Exception {
+        JMSEndpoint endpoint = resolveEndpoint("jms:queue:Foo.Bar");
+        assertFalse(endpoint.isUseObjectMessageFallback());
+        assertFalse(endpoint.isSetUseObjectMessageFallback());
+        assertFalse(new JMSEndpoint().isUseObjectMessageFallback());
+    }
+
+    @Test
+    public void testUseObjectMessageFallbackCanBeEnabledFromUri() throws Exception {
+        JMSEndpoint endpoint = resolveEndpoint("jms:queue:Foo.Bar?useObjectMessageFallback=true");
+        assertTrue(endpoint.isUseObjectMessageFallback());
+        assertNull(endpoint.getParameter("useObjectMessageFallback"));
+        assertFalse(endpoint.getRequestURI().contains("useObjectMessageFallback"));
+    }
+
     private JMSEndpoint resolveEndpoint(String uri) throws Exception {
         return JMSEndpointParser.createEndpoint(uri);
     }

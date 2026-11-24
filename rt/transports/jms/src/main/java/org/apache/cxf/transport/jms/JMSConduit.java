@@ -384,7 +384,8 @@ public class JMSConduit extends AbstractConduit implements JMSExchangeSender, Me
             JMSUtils.populateIncomingContext(jmsMessage, inMessage, 
                                              JMSConstants.JMS_CLIENT_RESPONSE_HEADERS, jmsConfig);
         
-            JMSUtils.retrieveAndSetPayload(inMessage, jmsMessage, (String)inMessage.get(Message.ENCODING));
+            JMSUtils.retrieveAndSetPayload(inMessage, jmsMessage, (String)inMessage.get(Message.ENCODING),
+                                           jmsConfig.isAllowObjectMessages());
 
             if (exchange.isSynchronous()) {
                 synchronized (exchange) {

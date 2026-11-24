@@ -214,7 +214,8 @@ public class JMSDestination extends AbstractMultiplexDestination
             JMSUtils.populateIncomingContext(message, inMessage, 
                                              JMSConstants.JMS_SERVER_REQUEST_HEADERS, jmsConfig);
             
-            JMSUtils.retrieveAndSetPayload(inMessage, message, (String)inMessage.get(Message.ENCODING));
+            JMSUtils.retrieveAndSetPayload(inMessage, message, (String)inMessage.get(Message.ENCODING),
+                                           jmsConfig.isAllowObjectMessages());
             inMessage.put(JMSConstants.JMS_SERVER_RESPONSE_HEADERS, new JMSMessageHeadersType());
             inMessage.put(JMSConstants.JMS_REQUEST_MESSAGE, message);
             ((MessageImpl)inMessage).setDestination(this);
@@ -338,7 +339,8 @@ public class JMSDestination extends AbstractMultiplexDestination
             getLogger().log(Level.FINE, "send out the message!");
             jmsTemplate.send(replyTo, new MessageCreator() {
                 public javax.jms.Message createMessage(Session session) throws JMSException {
-                    javax.jms.Message reply = JMSUtils.createAndSetPayload(replyObj, session, msgType);
+                    javax.jms.Message reply = JMSUtils.createAndSetPayload(replyObj, session, msgType,
+                                                       jmsConfig.isUseObjectMessageFallback());
 
                     reply.setJMSCorrelationID(determineCorrelationID(request));
 

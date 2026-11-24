@@ -92,6 +92,16 @@ public class JMSConfiguration implements InitializingBean {
      */
     private String replyToDestination;
     private String messageType = JMSConstants.TEXT_MESSAGE_TYPE;
+    /**
+     * Outbound only: when true, non-text payloads may fall back to ObjectMessage.
+     * When false, non-text payloads are sent as BytesMessage.
+     */
+    private boolean useObjectMessageFallback;
+    /**
+     * Inbound only: when true, ObjectMessage and StreamMessage deserialization is allowed.
+     * When false, inbound ObjectMessage and StreamMessage are rejected.
+     */
+    private boolean allowObjectMessages;
     private boolean pubSubDomain;
     private boolean replyPubSubDomain;
     private Boolean useConduitIdSelector;
@@ -328,6 +338,34 @@ public class JMSConfiguration implements InitializingBean {
 
     public void setMessageType(String messageType) {
         this.messageType = messageType;
+    }
+
+    /**
+     * Outbound only: controls ObjectMessage fallback in payload creation.
+     */
+    public boolean isUseObjectMessageFallback() {
+        return useObjectMessageFallback;
+    }
+
+    /**
+     * Outbound only: controls ObjectMessage fallback in payload creation.
+     */
+    public void setUseObjectMessageFallback(boolean useObjectMessageFallback) {
+        this.useObjectMessageFallback = useObjectMessageFallback;
+    }
+
+    /**
+     * Inbound only: controls whether ObjectMessage and StreamMessage deserialization is permitted.
+     */
+    public boolean isAllowObjectMessages() {
+        return allowObjectMessages;
+    }
+
+    /**
+     * Inbound only: controls whether ObjectMessage and StreamMessage deserialization is permitted.
+     */
+    public void setAllowObjectMessages(boolean allowObjectMessages) {
+        this.allowObjectMessages = allowObjectMessages;
     }
 
     public boolean isPubSubDomain() {

@@ -46,6 +46,10 @@ public final class JMSURIConstants {
     public static final String REPLYTONAME_PARAMETER_NAME = "replyToName";
     // The new configuration to set the message type of jms message body
     public static final String MESSAGE_TYPE_PARAMETER_NAME = "messageType";
+    // Outbound only: whether non-text payloads may fall back to ObjectMessage
+    public static final String USE_OBJECT_MESSAGE_FALLBACK_PARAMETER_NAME = "useObjectMessageFallback";
+    // Inbound only: whether ObjectMessage and StreamMessage deserialization is permitted
+    public static final String ALLOW_OBJECT_MESSAGES_PARAMETER_NAME = "allowObjectMessages";
 
     // default parameters
     public static final DeliveryModeType DELIVERYMODE_DEFAULT = DELIVERYMODE_PERSISTENT;

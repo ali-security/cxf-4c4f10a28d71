@@ -29,17 +29,20 @@ import java.util.logging.Logger;
 
 import javax.jms.BytesMessage;
 import javax.jms.JMSException;
+import javax.jms.ObjectMessage;
 import javax.jms.Session;
 
 import org.apache.cxf.BusFactory;
 import org.apache.cxf.bus.spring.SpringBusFactory;
 import org.apache.cxf.common.logging.LogUtils;
 import org.apache.cxf.helpers.IOUtils;
+import org.apache.cxf.message.ExchangeImpl;
 import org.apache.cxf.message.Message;
 import org.apache.cxf.message.MessageImpl;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.springframework.jms.JmsException;
 import org.springframework.jms.core.JmsTemplate;
 import org.springframework.jms.core.SessionCallback;
 
@@ -166,17 +169,120 @@ public class JMSConduitTest extends AbstractJMSTester {
         jmsTemplate.setConnectionFactory(jmsConfig.getOrCreateWrappedConnectionFactory());
         SessionCallback<javax.jms.Message> sc = new SessionCallback<javax.jms.Message>() {
             public javax.jms.Message doInJms(Session session) throws JMSException {
-                return JMSUtils.createAndSetPayload(testBytes, session, JMSConstants.BYTE_MESSAGE_TYPE);
+                return JMSUtils.createAndSetPayload(testBytes, session, JMSConstants.BYTE_MESSAGE_TYPE,
+                                                    false);
             }
         };
         javax.jms.Message message = jmsTemplate.execute(sc);
-        
+
         // The ibm jdk finalizes conduit (during most runs of this test) and
         // causes it to fail unless we reference the conduit here after the
         // jmsTemplate.execute() call.
         assertNotNull("Conduit is null", conduit);
 
         assertTrue("Message should have been of type BytesMessage ", message instanceof BytesMessage);
+
+        message = jmsTemplate.execute(new SessionCallback<javax.jms.Message>() {
+            public javax.jms.Message doInJms(Session session) throws JMSException {
+                return JMSUtils.createAndSetPayload(testBytes, session, JMSConstants.BINARY_MESSAGE_TYPE);
+            }
+        });
+        assertTrue("Binary message fallback should have been of type ObjectMessage ",
+                   message instanceof ObjectMessage);
+        message = jmsTemplate.execute(new SessionCallback<javax.jms.Message>() {
+            public javax.jms.Message doInJms(Session session) throws JMSException {
+                return JMSUtils.createAndSetPayload(testBytes, session, JMSConstants.BINARY_MESSAGE_TYPE,
+                                                    false);
+            }
+        });
+        assertTrue("Fallback-disabled binary message should have been of type BytesMessage ",
+                   message instanceof BytesMessage);
+        message = jmsTemplate.execute(new SessionCallback<javax.jms.Message>() {
+            public javax.jms.Message doInJms(Session session) throws JMSException {
+                return JMSUtils.createAndSetPayload(testBytes, session, JMSConstants.BINARY_MESSAGE_TYPE,
+                                                    true);
+            }
+        });
+        assertTrue("Fallback-enabled binary message should have been of type ObjectMessage ",
+                   message instanceof ObjectMessage);
+        message = jmsTemplate.execute(new SessionCallback<javax.jms.Message>() {
+            public javax.jms.Message doInJms(Session session) throws JMSException {
+                return JMSUtils.createAndSetPayload(testBytes, session, "application/octet-stream", true);
+            }
+        });
+        assertTrue("Non-text message fallback should have been of type ObjectMessage ",
+                   message instanceof ObjectMessage);
+        message = jmsTemplate.execute(new SessionCallback<javax.jms.Message>() {
+            public javax.jms.Message doInJms(Session session) throws JMSException {
+                return JMSUtils.createAndSetPayload(testBytes, session, "application/octet-stream", false);
+            }
+        });
+        assertTrue("Fallback-disabled message should have been of type BytesMessage ",
+                   message instanceof BytesMessage);
+    }
+
+    @Test
+    public void testJMSMessageMarshalUsesConfiguredObjectMessageFallback() throws Exception {
+        setupServiceInfo("http://cxf.apache.org/hello_world_jms", "/wsdl/jms_test.wsdl",
+                         "HelloWorldServiceLoop", "HelloWorldPortLoop");
+        JMSConduit conduit = setupJMSConduit(true, false);
+        final Message msg = new MessageImpl();
+        msg.setExchange(new ExchangeImpl());
+        final byte[] testBytes = "Test Message".getBytes("UTF-8");
+        final JMSConfiguration jmsConfig = conduit.getJmsConfig();
+        // the secure default never sends a binary payload as ObjectMessage
+        assertFalse(jmsConfig.isUseObjectMessageFallback());
+        JmsTemplate jmsTemplate = new JmsTemplate();
+        jmsTemplate.setConnectionFactory(jmsConfig.getOrCreateWrappedConnectionFactory());
+        SessionCallback<javax.jms.Message> sc = new SessionCallback<javax.jms.Message>() {
+            public javax.jms.Message doInJms(Session session) throws JMSException {
+                return JMSUtils.buildJMSMessageFromCXFMessage(jmsConfig, msg, testBytes,
+                                                              JMSConstants.BINARY_MESSAGE_TYPE,
+                                                              session, null, "cid");
+            }
+        };
+        javax.jms.Message message = jmsTemplate.execute(sc);
+        assertTrue("Binary message should have been of type BytesMessage by default",
+                   message instanceof BytesMessage);
+
+        jmsConfig.setUseObjectMessageFallback(true);
+        message = jmsTemplate.execute(sc);
+        assertTrue("Binary message should fall back to ObjectMessage when enabled",
+                   message instanceof ObjectMessage);
+        assertNotNull("Conduit is null", conduit);
+    }
+
+    @Test
+    public void testObjectMessageReplyIsRejectedByDefault() throws Exception {
+        setupServiceInfo("http://cxf.apache.org/hello_world_jms", "/wsdl/jms_test.wsdl",
+                         "HelloWorldService", "HelloWorldPort");
+        JMSConduit conduit = setupJMSConduit(true, false);
+        assertFalse(conduit.getJmsConfig().isAllowObjectMessages());
+        ObjectMessage reply = DeserializationTracker.createSerializedObjectMessage(new DeserializationTracker());
+        DeserializationTracker.reset();
+        try {
+            conduit.doReplyMessage(new ExchangeImpl(), reply);
+            fail("An ObjectMessage reply should have been rejected");
+        } catch (JmsException ex) {
+            assertTrue(ex.getMessage(), ex.getMessage().contains("ObjectMessage is disabled by configuration"));
+        }
+        assertFalse("The ObjectMessage body must not be deserialized", DeserializationTracker.isDeserialized());
+        assertNull("The rejected reply must not be dispatched", inMessage);
+        conduit.close();
+    }
+
+    @Test
+    public void testObjectMessageReplyIsAcceptedWhenAllowed() throws Exception {
+        setupServiceInfo("http://cxf.apache.org/hello_world_jms", "/wsdl/jms_test.wsdl",
+                         "HelloWorldService", "HelloWorldPort");
+        JMSConduit conduit = setupJMSConduit(true, false);
+        conduit.getJmsConfig().setAllowObjectMessages(true);
+        ObjectMessage reply =
+            DeserializationTracker.createSerializedObjectMessage(MESSAGE_CONTENT.getBytes("UTF-8"));
+        conduit.doReplyMessage(new ExchangeImpl(), reply);
+        assertNotNull("The reply should have been dispatched", inMessage);
+        assertEquals(MESSAGE_CONTENT, IOUtils.toString(inMessage.getContent(InputStream.class), "UTF-8"));
+        conduit.close();
     }
 
 }
