@@ -26,11 +26,17 @@ import javax.jms.ConnectionFactory;
 import javax.naming.Context;
 
 import org.apache.activemq.ActiveMQConnectionFactory;
+import org.apache.cxf.Bus;
+import org.apache.cxf.BusFactory;
+import org.apache.cxf.service.model.EndpointInfo;
 import org.apache.cxf.transport.jms.uri.JMSEndpoint;
 import org.apache.cxf.transport.jms.uri.JMSEndpointParser;
 import org.junit.Assert;
 import org.junit.Test;
+import org.springframework.jms.JmsException;
 import org.springframework.jms.connection.SingleConnectionFactory;
+import org.springframework.jms.support.destination.DestinationResolver;
+import org.springframework.jms.support.destination.JndiDestinationResolver;
 import org.springframework.jndi.JndiTemplate;
 
 public class JMSConfigurationTest extends Assert {
@@ -214,6 +220,179 @@ public class JMSConfigurationTest extends Assert {
         assertEquals("classpath:", protocols.get(2));
         assertTrue(JMSFactory.parseProtocols(null).isEmpty());
         assertTrue(JMSFactory.parseProtocols("").isEmpty());
+    }
+
+    @Test
+    public void testValidateJndiNamePlainNamesAllowed() {
+        // Ordinary local JNDI names must not be rejected
+        JMSFactory.validateJndiName("TransactionManager");
+        JMSFactory.validateJndiName("java:comp/env/jms/MyQueue");
+        JMSFactory.validateJndiName("java:/TransactionManager");
+        JMSFactory.validateJndiName("Foo.Bar");
+        JMSFactory.validateJndiName(null);
+    }
+
+    @Test
+    public void testValidateJndiNameRemoteUrlRejected() {
+        String[] malicious = new String[] {
+            "ldap://attacker.com/exploit",
+            "ldaps://attacker.com/exploit",
+            "rmi://attacker.com/exploit",
+            "iiop://attacker.com/exploit",
+            "corba://attacker.com/exploit",
+            "dns://attacker.com/exploit",
+        };
+        for (int i = 0; i < malicious.length; i++) {
+            try {
+                JMSFactory.validateJndiName(malicious[i]);
+                fail("Expected IllegalArgumentException for: " + malicious[i]);
+            } catch (IllegalArgumentException e) {
+                assertTrue(e.getMessage().contains("JNDI name must not contain a URL"));
+            }
+        }
+    }
+
+    @Test
+    public void testJndiNameInjectionOnConnectionFactoryLookup() throws Exception {
+        JNDIConfiguration jndiConfig = new JNDIConfiguration();
+        jndiConfig.setJndiConnectionFactoryName("ldap://attacker.com:389/exploit");
+
+        JMSConfiguration jmsConfig = new JMSConfiguration();
+        jmsConfig.setJndiConfig(jndiConfig);
+        jmsConfig.setJndiTemplate(new JndiTemplate());
+
+        try {
+            JMSFactory.getConnectionFactoryFromJndi(jmsConfig);
+            fail("URL style connection factory name should have been rejected");
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("JNDI name must not contain a URL"));
+        }
+    }
+
+    @Test
+    public void testJndiDestinationResolverRejectsUrlName() throws Exception {
+        JndiDestinationResolver resolver = new JMSOldConfigHolder.ValidatingJndiDestinationResolver();
+        try {
+            resolver.resolveDestinationName(null, "ldap://attacker.com:389/exploit", false);
+            fail("URL style destination name should have been rejected");
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("JNDI name must not contain a URL"));
+        }
+    }
+
+    @Test
+    public void testJndiDestinationResolverAllowsPlainName() throws Exception {
+        JndiDestinationResolver resolver = new JMSOldConfigHolder.ValidatingJndiDestinationResolver();
+        boolean rejected = false;
+        try {
+            resolver.resolveDestinationName(null, "jms/MyQueue", false);
+        } catch (IllegalArgumentException e) {
+            rejected = true;
+        } catch (JmsException e) {
+            // There is no naming context in this unit test so the lookup itself has to fail
+            assertNotNull(e);
+        }
+        assertFalse("A plain JNDI name must not be rejected by the validation", rejected);
+    }
+
+    @Test
+    public void testJndiDestinationResolverIsUsedForJndiUri() throws Exception {
+        Bus oldBus = BusFactory.getDefaultBus(false);
+        Bus bus = BusFactory.newInstance().createBus();
+        try {
+            EndpointInfo ei = new EndpointInfo();
+            ei.setAddress("jms:jndi:ldap://attacker.com:389/exploit"
+                          + "?jndiConnectionFactoryName=ConnectionFactory");
+            JMSConfiguration config = new JMSOldConfigHolder()
+                .createJMSConfigurationFromEndpointInfo(bus, ei, null, true);
+            DestinationResolver resolver = config.getDestinationResolver();
+            assertTrue("The jndi variant has to use the validating destination resolver",
+                       resolver instanceof JMSOldConfigHolder.ValidatingJndiDestinationResolver);
+            assertEquals("ldap://attacker.com:389/exploit", config.getTargetDestination());
+            try {
+                resolver.resolveDestinationName(null, config.getTargetDestination(), false);
+                fail("URL style destination name from a jms uri should have been rejected");
+            } catch (IllegalArgumentException e) {
+                assertTrue(e.getMessage().contains("JNDI name must not contain a URL"));
+            }
+        } finally {
+            bus.shutdown(true);
+            BusFactory.setDefaultBus(oldBus);
+        }
+    }
+
+    @Test
+    public void testBlockedObjectFactoryRejected() {
+        assertBlockedEnvProperty("java.naming.factory.object", "com.attacker.EvilObjectFactory");
+    }
+
+    @Test
+    public void testBlockedStateFactoryRejected() {
+        assertBlockedEnvProperty("java.naming.factory.state", "com.attacker.EvilStateFactory");
+    }
+
+    @Test
+    public void testBlockedUrlPkgsRejected() {
+        assertBlockedEnvProperty("java.naming.factory.url.pkgs", "com.attacker");
+    }
+
+    @Test
+    public void testBlockedEnvPropertyFromJmsUri() throws Exception {
+        JMSEndpoint endpoint = JMSEndpointParser
+            .createEndpoint("jms:jndi:Foo.Bar?jndiConnectionFactoryName=ConnectionFactory"
+                            + "&jndi-java.naming.factory.object=com.attacker.EvilObjectFactory");
+        try {
+            JMSOldConfigHolder.getInitialContextEnv(endpoint);
+            fail("Unsafe java.naming.factory.object should have been rejected");
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("Disallowed JNDI environment property"));
+            assertTrue(e.getMessage().contains("java.naming.factory.object"));
+        }
+    }
+
+    @Test
+    public void testInitialContextFactoryIsAllowed() throws Exception {
+        // The initial context factory is a first class configuration parameter of every JNDI
+        // based JMS deployment so it must not be blocked
+        Properties env = createJndiEnvironment("vm://localhost");
+        env.put(Context.INITIAL_CONTEXT_FACTORY,
+                "org.apache.activemq.jndi.ActiveMQInitialContextFactory");
+        JNDIConfiguration jndiConfig = new JNDIConfiguration();
+        jndiConfig.setEnvironment(env);
+        assertNotNull(jndiConfig.createJndiTemple());
+    }
+
+    @Test
+    public void testEmptyJndiEnvironmentIsAllowed() {
+        JMSFactory.checkJndiEnvironment(new Properties());
+        JMSFactory.checkJndiEnvironment(null);
+    }
+
+    private void assertBlockedEnvProperty(String key, String value) {
+        Properties env = new Properties();
+        env.put(key, value);
+        try {
+            JMSFactory.checkJndiEnvironment(env);
+            fail("JNDI environment property should have been rejected: " + key);
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("Disallowed JNDI environment property"));
+            assertTrue(e.getMessage().contains(key));
+        }
+        // The property has to be refused on the configuration objects as well
+        try {
+            new JNDIConfiguration().setEnvironment(env);
+            fail("JNDI environment property should have been rejected: " + key);
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("Disallowed JNDI environment property"));
+        }
+        JndiTemplate jt = new JndiTemplate();
+        jt.setEnvironment(env);
+        try {
+            new JMSConfiguration().setJndiTemplate(jt);
+            fail("JNDI environment property should have been rejected: " + key);
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("Disallowed JNDI environment property"));
+        }
     }
 
     private Properties createJndiEnvironment(String providerUrl) {

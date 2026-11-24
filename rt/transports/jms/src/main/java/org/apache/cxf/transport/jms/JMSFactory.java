@@ -20,9 +20,12 @@ package org.apache.cxf.transport.jms;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Properties;
+import java.util.Set;
 import java.util.StringTokenizer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -68,6 +71,31 @@ public final class JMSFactory {
         = "vm,tcp,nio,ssl,http,https,ws,wss,classpath:";
 
     private static final List<String> ALLOWED_PROTOCOLS = parseProtocols(getConfiguredProtocols());
+
+    /**
+     * JNDI environment properties that must not be supplied from untrusted input.
+     * <p>
+     * Note: {@code java.naming.factory.initial} (INITIAL_CONTEXT_FACTORY) is intentionally
+     * absent. It is a first-class, documented configuration parameter - every JNDI based JMS
+     * deployment sets it to the broker's context factory (e.g. ActiveMQ, Artemis, WebLogic).
+     * It is safe to allow because any attempt to redirect lookups to a remote host via a
+     * substitute factory still requires setting PROVIDER_URL to a non JMS scheme, which the
+     * protocol allowlist check rejects independently.
+     * </p>
+     * <ul>
+     *   <li>{@code java.naming.factory.object} - object factories reconstruct objects returned
+     *       by a lookup and can deserialize remote payloads.</li>
+     *   <li>{@code java.naming.factory.state} - state factories run during bind/rebind and
+     *       can trigger arbitrary serialization logic.</li>
+     *   <li>{@code java.naming.factory.url.pkgs} - injects packages for URL context factory
+     *       resolution and could register a handler for an otherwise allowed scheme.</li>
+     * </ul>
+     */
+    private static final Set<String> BLOCKED_ENV_KEYS
+        = Collections.unmodifiableSet(new LinkedHashSet<String>(Arrays.asList(
+            "java.naming.factory.object",
+            "java.naming.factory.state",
+            "java.naming.factory.url.pkgs")));
 
     private JMSFactory() {
     }
@@ -123,13 +151,31 @@ public final class JMSFactory {
     }
 
     /**
-     * Validate the provider url of a JNDI environment.
+     * Rejects lookup names that contain a URL scheme (e.g. ldap://, rmi://), which would
+     * redirect the lookup to a remote server and enable JNDI injection.
+     *
+     * @param name the JNDI name that is about to be looked up
+     */
+    public static void validateJndiName(String name) {
+        if (name != null && name.indexOf("://") >= 0) {
+            throw new IllegalArgumentException("JNDI name must not contain a URL: " + name);
+        }
+    }
+
+    /**
+     * Validate the provider url and the properties of a JNDI environment.
      *
      * @param environment the JNDI environment to validate
      */
     static void checkJndiEnvironment(Properties environment) {
         if (environment == null) {
             return;
+        }
+        // Reject properties that could be used to redirect or hijack the JNDI lookup
+        for (String blocked : BLOCKED_ENV_KEYS) {
+            if (environment.containsKey(blocked)) {
+                throw new IllegalArgumentException("Disallowed JNDI environment property: " + blocked);
+            }
         }
         String providerUrl = environment.getProperty(Context.PROVIDER_URL);
         if (providerUrl == null) {
@@ -158,8 +204,10 @@ public final class JMSFactory {
         }
         String userName = jndiConfig.getConnectionUserName();
         String password = jndiConfig.getConnectionPassword();
-        // Reject unsafe protocols before the lookup is done. This is deliberately kept outside of
-        // the try block so the failure is not wrapped into the RuntimeException below.
+        // Reject unsafe protocols and URL style lookup names before the lookup is done. This is
+        // deliberately kept outside of the try block so the failure is not wrapped into the
+        // RuntimeException below.
+        validateJndiName(connectionFactoryName);
         checkJndiEnvironment(jndiConfig.getEnvironment());
         if (jmsConfig.getJndiTemplate() != null) {
             checkJndiEnvironment(jmsConfig.getJndiTemplate().getEnvironment());

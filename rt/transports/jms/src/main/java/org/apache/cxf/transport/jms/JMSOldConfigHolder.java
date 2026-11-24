@@ -26,6 +26,9 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import javax.jms.DeliveryMode;
+import javax.jms.Destination;
+import javax.jms.JMSException;
+import javax.jms.Session;
 import javax.naming.Context;
 
 import org.apache.cxf.Bus;
@@ -275,8 +278,10 @@ public class JMSOldConfigHolder {
             }
             boolean useJndi = endpoint.getJmsVariant().contains(JMSURIConstants.JNDI);
             if (useJndi) {
-                // Setup Destination jndi destination resolver
-                final JndiDestinationResolver jndiDestinationResolver = new JndiDestinationResolver();
+                // Setup Destination jndi destination resolver. The destination names come from
+                // the jms uri or the wsdl so the resolver has to refuse URL style names.
+                final JndiDestinationResolver jndiDestinationResolver
+                    = new ValidatingJndiDestinationResolver();
                 jndiDestinationResolver.setJndiTemplate(jt);
                 jmsConfig.setDestinationResolver(jndiDestinationResolver);
                 jmsConfig.setTargetDestination(endpoint.getDestinationName());
@@ -470,5 +475,21 @@ public class JMSOldConfigHolder {
             }
         }
         return env;
+    }
+
+    /**
+     * Destination resolver that refuses to look up a JNDI name that contains a URL. The
+     * destination names are taken from the jms uri or the wsdl, so a name like
+     * "ldap://host/object" would make the naming context contact a remote server and
+     * instantiate whatever class that server hands back.
+     */
+    static class ValidatingJndiDestinationResolver extends JndiDestinationResolver {
+
+        @Override
+        public Destination resolveDestinationName(Session session, String destinationName,
+                                                  boolean pubSubDomain) throws JMSException {
+            JMSFactory.validateJndiName(destinationName);
+            return super.resolveDestinationName(session, destinationName, pubSubDomain);
+        }
     }
 }
