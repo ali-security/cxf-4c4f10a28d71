@@ -434,6 +434,10 @@ public class JMSConfiguration implements InitializingBean {
     }
 
     public void setJndiTemplate(JndiTemplate jndiTemplate) {
+        // Avoid unsafe protocols if they are somehow misconfigured
+        if (jndiTemplate != null) {
+            JMSFactory.checkJndiEnvironment(jndiTemplate.getEnvironment());
+        }
         this.jndiTemplate = jndiTemplate;
     }
 

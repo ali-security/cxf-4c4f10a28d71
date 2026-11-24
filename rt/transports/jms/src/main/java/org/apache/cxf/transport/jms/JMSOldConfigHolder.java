@@ -459,6 +459,8 @@ public class JMSOldConfigHolder {
         for (Map.Entry<String, String> ent : endpoint.getJndiParameters().entrySet()) {
             env.put(ent.getKey(), ent.getValue());
         }
+        // Avoid unsafe protocols if they are somehow misconfigured
+        JMSFactory.checkJndiEnvironment(env);
         if (LOG.isLoggable(Level.FINE)) {
             Enumeration<?> props = env.propertyNames();
             while (props.hasMoreElements()) {

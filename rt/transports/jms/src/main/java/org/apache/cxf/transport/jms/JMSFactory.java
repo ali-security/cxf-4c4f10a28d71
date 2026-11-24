@@ -19,6 +19,11 @@
 package org.apache.cxf.transport.jms;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Properties;
+import java.util.StringTokenizer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -29,6 +34,7 @@ import javax.jms.MessageListener;
 import javax.jms.QueueSession;
 import javax.jms.Session;
 import javax.jms.XAConnectionFactory;
+import javax.naming.Context;
 import javax.naming.NamingException;
 
 import org.apache.cxf.common.logging.LogUtils;
@@ -48,8 +54,89 @@ import org.springframework.jms.support.destination.DestinationResolver;
 public final class JMSFactory {
 
     private static final Logger LOG = LogUtils.getL7dLogger(JMSFactory.class);
-    
+
+    /**
+     * JVM/System property name holding the protocols a JNDI provider url may use.
+     */
+    private static final String CONFIGURED_JMS_PROTOCOLS = "jms.protocols";
+
+    /**
+     * Constant holding the default allowed jms protocols. A token that already ends with a colon
+     * is used as a literal prefix, every other token stands for the "token://" url prefix.
+     */
+    private static final String DEFAULT_JMS_PROTOCOLS
+        = "vm,tcp,nio,ssl,http,https,ws,wss,classpath:";
+
+    private static final List<String> ALLOWED_PROTOCOLS = parseProtocols(getConfiguredProtocols());
+
     private JMSFactory() {
+    }
+
+    private static String getConfiguredProtocols() {
+        try {
+            return System.getProperty(CONFIGURED_JMS_PROTOCOLS, DEFAULT_JMS_PROTOCOLS);
+        } catch (SecurityException ex) {
+            return DEFAULT_JMS_PROTOCOLS;
+        }
+    }
+
+    /**
+     * Turn a comma separated list of protocols into the list of prefixes a JNDI provider url is
+     * allowed to start with. A token ending with a colon is taken as a literal prefix, any other
+     * token is expanded by appending "://" to it.
+     *
+     * @param protocols comma separated list of protocols
+     * @return the immutable list of allowed provider url prefixes
+     */
+    static List<String> parseProtocols(String protocols) {
+        if (protocols == null) {
+            return Collections.emptyList();
+        }
+        List<String> allowed = new ArrayList<String>();
+        StringTokenizer tokenizer = new StringTokenizer(protocols, ",");
+        while (tokenizer.hasMoreTokens()) {
+            String protocol = tokenizer.nextToken().trim();
+            if (protocol.length() > 0) {
+                allowed.add(protocol.endsWith(":") ? protocol : protocol + "://");
+            }
+        }
+        return Collections.unmodifiableList(allowed);
+    }
+
+    /**
+     * Avoid unsafe protocols like ldap or rmi in a JNDI provider url. Looking up an object over
+     * such a protocol lets the remote side decide which class is instantiated locally, so a
+     * provider url coming from a jms uri or a wsdl must never reach the naming context.
+     *
+     * @param providerUrl the JNDI provider url to validate
+     */
+    static void checkProviderUrl(String providerUrl) {
+        if (providerUrl == null || providerUrl.length() == 0) {
+            return;
+        }
+        for (int i = 0; i < ALLOWED_PROTOCOLS.size(); i++) {
+            if (providerUrl.startsWith(ALLOWED_PROTOCOLS.get(i))) {
+                return;
+            }
+        }
+        throw new IllegalArgumentException("Unsafe protocol in JNDI URL: " + providerUrl);
+    }
+
+    /**
+     * Validate the provider url of a JNDI environment.
+     *
+     * @param environment the JNDI environment to validate
+     */
+    static void checkJndiEnvironment(Properties environment) {
+        if (environment == null) {
+            return;
+        }
+        String providerUrl = environment.getProperty(Context.PROVIDER_URL);
+        if (providerUrl == null) {
+            Object value = environment.get(Context.PROVIDER_URL);
+            providerUrl = value == null ? null : value.toString();
+        }
+        checkProviderUrl(providerUrl);
     }
 
     /**
@@ -71,6 +158,12 @@ public final class JMSFactory {
         }
         String userName = jndiConfig.getConnectionUserName();
         String password = jndiConfig.getConnectionPassword();
+        // Reject unsafe protocols before the lookup is done. This is deliberately kept outside of
+        // the try block so the failure is not wrapped into the RuntimeException below.
+        checkJndiEnvironment(jndiConfig.getEnvironment());
+        if (jmsConfig.getJndiTemplate() != null) {
+            checkJndiEnvironment(jmsConfig.getJndiTemplate().getEnvironment());
+        }
         try {
             ConnectionFactory cf = (ConnectionFactory)jmsConfig.getJndiTemplate().
                 lookup(connectionFactoryName);

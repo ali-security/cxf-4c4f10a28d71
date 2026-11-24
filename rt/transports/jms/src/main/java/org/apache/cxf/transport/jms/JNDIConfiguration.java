@@ -30,6 +30,8 @@ public class JNDIConfiguration {
     private String connectionPassword;
     
     public JndiTemplate createJndiTemple() {
+        // Avoid unsafe protocols if they are somehow misconfigured
+        JMSFactory.checkJndiEnvironment(environment);
         JndiTemplate jt = new JndiTemplate();
         jt.setEnvironment(environment);
         return jt;
@@ -64,6 +66,8 @@ public class JNDIConfiguration {
     }
 
     public void setEnvironment(Properties environment) {
+        // Avoid unsafe protocols if they are somehow misconfigured
+        JMSFactory.checkJndiEnvironment(environment);
         this.environment = environment;
     }
 
